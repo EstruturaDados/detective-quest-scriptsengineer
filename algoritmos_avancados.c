@@ -1,46 +1,192 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
 
-// Desafio Detective Quest
-// Tema 4 - Árvores e Tabela Hash
-// Este código inicial serve como base para o desenvolvimento das estruturas de navegação, pistas e suspeitos.
-// Use as instruções de cada região para desenvolver o sistema completo com árvore binária, árvore de busca e tabela hash.
+// Desafio Detective Quest - Implementação do mapa da mansão
+// Este arquivo implementa uma árvore binária simples onde cada nó representa uma sala.
+
+// =========================
+// Estrutura: Sala (nó da árvore)
+// =========================
+// Cada sala possui um nome (string alocada dinamicamente) e dois ponteiros
+// para as salas à esquerda e à direita.
+typedef struct Sala {
+    char *nome;
+    struct Sala *esquerda;
+    struct Sala *direita;
+} Sala;
+
+// criarSala() – cria, de forma dinâmica, uma sala com nome.
+// Parâmetros: const char *nome - texto com o nome da sala
+// Retorno: ponteiro para Sala recém-alocada (com cópia do nome)
+Sala *criarSala(const char *nome) {
+    Sala *s = (Sala *)malloc(sizeof(Sala));
+    if (!s) {
+        fprintf(stderr, "Erro de alocação de memória para Sala\n");
+        exit(EXIT_FAILURE);
+    }
+    // usar versão segura de strdup para portabilidade
+    extern char *strdup(const char *);
+    char *temp_nome = NULL;
+#if defined(_POSIX_C_SOURCE) || defined(_BSD_SOURCE) || defined(_GNU_SOURCE)
+    temp_nome = strdup(nome);
+#else
+    // fallback simples quando strdup não está declarado
+    size_t _len = strlen(nome) + 1;
+    temp_nome = (char *)malloc(_len);
+    if (temp_nome) memcpy(temp_nome, nome, _len);
+#endif
+    s->nome = temp_nome;
+    if (!s->nome) {
+        fprintf(stderr, "Erro de alocação de memória para nome da Sala\n");
+        free(s);
+        exit(EXIT_FAILURE);
+    }
+    s->esquerda = NULL;
+    s->direita = NULL;
+    return s;
+}
+
+// conectarSalas() – conecta um nó pai às salas filhas esquerda e direita.
+void conectarSalas(Sala *pai, Sala *esq, Sala *dir) {
+    if (!pai) return;
+    pai->esquerda = esq;
+    pai->direita = dir;
+}
+
+// liberarArvore() – libera recursivamente a árvore e os nomes alocados.
+void liberarArvore(Sala *raiz) {
+    if (!raiz) return;
+    liberarArvore(raiz->esquerda);
+    liberarArvore(raiz->direita);
+    free(raiz->nome);
+    free(raiz);
+}
+
+// explorarSalas() – permite a navegação do jogador pela árvore.
+// O jogador começa em 'raiz' e pode escolher: 'e' para esquerda, 'd' para direita, 's' para sair.
+// A função exibe o nome da sala a cada movimento e, ao final, lista as salas visitadas.
+void explorarSalas(Sala *raiz) {
+    if (!raiz) {
+        printf("Mapa vazio. Nada para explorar.\n");
+        return;
+    }
+
+    // vetor dinâmico para guardar os nomes visitados (apontadores para cópias)
+    char **visitados = NULL;
+    size_t visit_count = 0;
+
+    Sala *atual = raiz;
+    char entrada[64];
+
+    while (atual) {
+        printf("\nVocê está em: %s\n", atual->nome);
+
+        // registra visita (fazer cópia do nome para manter histórico independente da liberação)
+    char *copia = NULL;
+#if defined(_POSIX_C_SOURCE) || defined(_BSD_SOURCE) || defined(_GNU_SOURCE)
+    copia = strdup(atual->nome);
+#else
+    size_t _l = strlen(atual->nome) + 1;
+    copia = (char *)malloc(_l);
+    if (copia) memcpy(copia, atual->nome, _l);
+#endif
+        if (!copia) {
+            fprintf(stderr, "Erro alocando memória para histórico de visitas\n");
+            break;
+        }
+        char **tmp = realloc(visitados, (visit_count + 1) * sizeof(char *));
+        if (!tmp) {
+            fprintf(stderr, "Erro alocando memória para histórico de visitas\n");
+            free(copia);
+            break;
+        }
+        visitados = tmp;
+        visitados[visit_count++] = copia;
+
+        // verifica se é folha
+        if (!atual->esquerda && !atual->direita) {
+            printf("Você alcançou um cômodo sem mais caminhos (nó-folha). Exploração encerrada.\n");
+            break;
+        }
+
+        // mostra opções disponíveis
+        printf("Escolha uma direção: ");
+        if (atual->esquerda) printf("(e) esquerda ");
+        if (atual->direita) printf("(d) direita ");
+        printf("(s) sair\n");
+
+        // lê entrada do usuário
+        if (!fgets(entrada, sizeof(entrada), stdin)) {
+            // EOF ou erro
+            printf("Entrada encerrada. Saindo...\n");
+            break;
+        }
+
+        // interpreta primeira letra
+        char opc = tolower((unsigned char)entrada[0]);
+        if (opc == 's') {
+            printf("Saindo da exploração conforme solicitado.\n");
+            break;
+        } else if (opc == 'e') {
+            if (atual->esquerda) {
+                atual = atual->esquerda;
+            } else {
+                printf("Caminho à esquerda indisponível. Escolha outra opção.\n");
+            }
+        } else if (opc == 'd') {
+            if (atual->direita) {
+                atual = atual->direita;
+            } else {
+                printf("Caminho à direita indisponível. Escolha outra opção.\n");
+            }
+        } else {
+            printf("Opção inválida. Use 'e', 'd' ou 's'.\n");
+        }
+    }
+
+    // exibe histórico de salas visitadas
+    if (visit_count > 0) {
+        printf("\nSalas visitadas (%zu):\n", visit_count);
+        for (size_t i = 0; i < visit_count; ++i) {
+            printf("%zu. %s\n", i + 1, visitados[i]);
+            free(visitados[i]);
+        }
+        free(visitados);
+    }
+}
 
 int main() {
 
     // 🌱 Nível Novato: Mapa da Mansão com Árvore Binária
-    //
-    // - Crie uma struct Sala com nome, e dois ponteiros: esquerda e direita.
-    // - Use funções como criarSala(), conectarSalas() e explorarSalas().
-    // - A árvore pode ser fixa: Hall de Entrada, Biblioteca, Cozinha, Sótão etc.
-    // - O jogador deve poder explorar indo à esquerda (e) ou à direita (d).
-    // - Finalize a exploração com uma opção de saída (s).
-    // - Exiba o nome da sala a cada movimento.
-    // - Use recursão ou laços para caminhar pela árvore.
-    // - Nenhuma inserção dinâmica é necessária neste nível.
+    // Montamos a árvore de forma manual (alocação dinâmica com criarSala())
+    // Estrutura da mansão (exemplo):
+    //                 Hall de Entrada
+    //                /               
+    //         Biblioteca            Cozinha
+    //         /      \              /     
+    //     Sótão   Escritório    Jardim  Sala de Jantar
 
-    // 🔍 Nível Aventureiro: Armazenamento de Pistas com Árvore de Busca
-    //
-    // - Crie uma struct Pista com campo texto (string).
-    // - Crie uma árvore binária de busca (BST) para inserir as pistas coletadas.
-    // - Ao visitar salas específicas, adicione pistas automaticamente com inserirBST().
-    // - Implemente uma função para exibir as pistas em ordem alfabética (emOrdem()).
-    // - Utilize alocação dinâmica e comparação de strings (strcmp) para organizar.
-    // - Não precisa remover ou balancear a árvore.
-    // - Use funções para modularizar: inserirPista(), listarPistas().
-    // - A árvore de pistas deve ser exibida quando o jogador quiser revisar evidências.
+    Sala *hall = criarSala("Hall de Entrada");
+    Sala *biblioteca = criarSala("Biblioteca");
+    Sala *cozinha = criarSala("Cozinha");
+    Sala *sotao = criarSala("Sótão");
+    Sala *escritorio = criarSala("Escritório");
+    Sala *jardim = criarSala("Jardim");
+    Sala *salaJantar = criarSala("Sala de Jantar");
 
-    // 🧠 Nível Mestre: Relacionamento de Pistas com Suspeitos via Hash
-    //
-    // - Crie uma struct Suspeito contendo nome e lista de pistas associadas.
-    // - Crie uma tabela hash (ex: array de ponteiros para listas encadeadas).
-    // - A chave pode ser o nome do suspeito ou derivada das pistas.
-    // - Implemente uma função inserirHash(pista, suspeito) para registrar relações.
-    // - Crie uma função para mostrar todos os suspeitos e suas respectivas pistas.
-    // - Adicione um contador para saber qual suspeito foi mais citado.
-    // - Exiba ao final o “suspeito mais provável” baseado nas pistas coletadas.
-    // - Para hashing simples, pode usar soma dos valores ASCII do nome ou primeira letra.
-    // - Em caso de colisão, use lista encadeada para tratar.
-    // - Modularize com funções como inicializarHash(), buscarSuspeito(), listarAssociacoes().
+    conectarSalas(hall, biblioteca, cozinha);
+    conectarSalas(biblioteca, sotao, escritorio);
+    conectarSalas(cozinha, jardim, salaJantar);
+
+    printf("Bem-vindo(a) ao Detective Quest - Exploração da Mansão\n");
+    printf("Começando no Hall de Entrada. Navegue com 'e' (esquerda), 'd' (direita) ou 's' (sair).\n");
+
+    explorarSalas(hall);
+
+    // libera memória
+    liberarArvore(hall);
 
     return 0;
 }
