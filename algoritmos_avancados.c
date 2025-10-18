@@ -13,14 +13,32 @@
 // para as salas à esquerda e à direita.
 typedef struct Sala {
     char *nome;
+    char *pista; // pista opcional presente na sala
     struct Sala *esquerda;
     struct Sala *direita;
 } Sala;
 
+// strdup_safe() - cópia de string com fallback quando strdup não estiver disponível
+static char *strdup_safe(const char *s) {
+    if (!s) return NULL;
+#if defined(_POSIX_C_SOURCE) || defined(_BSD_SOURCE) || defined(_GNU_SOURCE)
+    return strdup(s);
+#else
+    size_t n = strlen(s) + 1;
+    char *p = (char *)malloc(n);
+    if (p) memcpy(p, s, n);
+    return p;
+#endif
+}
+
 // criarSala() – cria, de forma dinâmica, uma sala com nome.
 // Parâmetros: const char *nome - texto com o nome da sala
 // Retorno: ponteiro para Sala recém-alocada (com cópia do nome)
-Sala *criarSala(const char *nome) {
+// criarSala() – cria, de forma dinâmica, uma sala com nome e pista opcional.
+// Parâmetros: const char *nome - nome da sala
+//             const char *pista - texto da pista (pode ser NULL)
+// Retorno: ponteiro para Sala recém-alocada (com cópia do nome e da pista)
+Sala *criarSala(const char *nome, const char *pista) {
     Sala *s = (Sala *)malloc(sizeof(Sala));
     if (!s) {
         fprintf(stderr, "Erro de alocação de memória para Sala\n");
@@ -45,6 +63,18 @@ Sala *criarSala(const char *nome) {
     }
     s->esquerda = NULL;
     s->direita = NULL;
+    // copia da pista, se fornecida
+    if (pista) {
+        s->pista = strdup_safe(pista);
+        if (!s->pista) {
+            fprintf(stderr, "Erro alocando pista para Sala\n");
+            free(s->nome);
+            free(s);
+            exit(EXIT_FAILURE);
+        }
+    } else {
+        s->pista = NULL;
+    }
     return s;
 }
 
@@ -61,18 +91,65 @@ void liberarArvore(Sala *raiz) {
     liberarArvore(raiz->esquerda);
     liberarArvore(raiz->direita);
     free(raiz->nome);
+    free(raiz->pista);
     free(raiz);
 }
 
 // explorarSalas() – permite a navegação do jogador pela árvore.
 // O jogador começa em 'raiz' e pode escolher: 'e' para esquerda, 'd' para direita, 's' para sair.
 // A função exibe o nome da sala a cada movimento e, ao final, lista as salas visitadas.
+// Estrutura para a árvore de pistas (BST)
+typedef struct PistaNode {
+    char *texto;
+    struct PistaNode *esq;
+    struct PistaNode *dir;
+} PistaNode;
+
+// inserirPista() – insere uma nova pista na BST de forma ordenada.
+// Ignora inserção de duplicatas exatas.
+PistaNode *inserirPista(PistaNode *raiz, const char *texto) {
+    if (!texto) return raiz;
+    if (!raiz) {
+        PistaNode *n = (PistaNode *)malloc(sizeof(PistaNode));
+        if (!n) { fprintf(stderr, "Erro alocando nó de pista\n"); exit(EXIT_FAILURE); }
+        n->texto = strdup_safe(texto);
+        if (!n->texto) { fprintf(stderr, "Erro alocando texto da pista\n"); exit(EXIT_FAILURE); }
+        n->esq = n->dir = NULL;
+        return n;
+    }
+    int cmp = strcmp(texto, raiz->texto);
+    if (cmp == 0) return raiz; // já existe
+    if (cmp < 0) raiz->esq = inserirPista(raiz->esq, texto);
+    else raiz->dir = inserirPista(raiz->dir, texto);
+    return raiz;
+}
+
+// exibirPistas() – percorre a BST em ordem e imprime as pistas em ordem alfabética.
+void exibirPistas(PistaNode *raiz) {
+    if (!raiz) return;
+    exibirPistas(raiz->esq);
+    printf("- %s\n", raiz->texto);
+    exibirPistas(raiz->dir);
+}
+
+// liberarPistas() – libera memória da BST de pistas.
+void liberarPistas(PistaNode *raiz) {
+    if (!raiz) return;
+    liberarPistas(raiz->esq);
+    liberarPistas(raiz->dir);
+    free(raiz->texto);
+    free(raiz);
+}
+
+// explorarSalasComPistas() – permite a navegação do jogador pela árvore e coleta pistas.
+// Ao visitar uma sala com pista, insere a pista na BST (apenas uma vez).
 void explorarSalas(Sala *raiz) {
     if (!raiz) {
         printf("Mapa vazio. Nada para explorar.\n");
         return;
     }
-
+    // Para esta versão, vamos coletar pistas em uma BST enquanto navegamos.
+    PistaNode *arvorePistas = NULL;
     // vetor dinâmico para guardar os nomes visitados (apontadores para cópias)
     char **visitados = NULL;
     size_t visit_count = 0;
@@ -80,11 +157,11 @@ void explorarSalas(Sala *raiz) {
     Sala *atual = raiz;
     char entrada[64];
 
-    while (atual) {
+    while (1) {
         printf("\nVocê está em: %s\n", atual->nome);
 
         // registra visita (fazer cópia do nome para manter histórico independente da liberação)
-    char *copia = NULL;
+        char *copia = NULL;
 #if defined(_POSIX_C_SOURCE) || defined(_BSD_SOURCE) || defined(_GNU_SOURCE)
     copia = strdup(atual->nome);
 #else
@@ -105,10 +182,13 @@ void explorarSalas(Sala *raiz) {
         visitados = tmp;
         visitados[visit_count++] = copia;
 
-        // verifica se é folha
-        if (!atual->esquerda && !atual->direita) {
-            printf("Você alcançou um cômodo sem mais caminhos (nó-folha). Exploração encerrada.\n");
-            break;
+        // se há pista na sala, adiciona à árvore de pistas e limpa a pista da sala
+        if (atual->pista) {
+            printf("Você encontrou uma pista: %s\n", atual->pista);
+            arvorePistas = inserirPista(arvorePistas, atual->pista);
+            // evita recolher a mesma pista novamente
+            free(atual->pista);
+            atual->pista = NULL;
         }
 
         // mostra opções disponíveis
@@ -155,6 +235,16 @@ void explorarSalas(Sala *raiz) {
         }
         free(visitados);
     }
+
+    // exibe pistas coletadas em ordem alfabética
+    printf("\nPistas coletadas (ordem alfabética):\n");
+    if (!arvorePistas) {
+        printf("(nenhuma pista coletada)\n");
+    } else {
+        exibirPistas(arvorePistas);
+    }
+
+    liberarPistas(arvorePistas);
 }
 
 int main() {
@@ -168,13 +258,13 @@ int main() {
     //         /      \              /     
     //     Sótão   Escritório    Jardim  Sala de Jantar
 
-    Sala *hall = criarSala("Hall de Entrada");
-    Sala *biblioteca = criarSala("Biblioteca");
-    Sala *cozinha = criarSala("Cozinha");
-    Sala *sotao = criarSala("Sótão");
-    Sala *escritorio = criarSala("Escritório");
-    Sala *jardim = criarSala("Jardim");
-    Sala *salaJantar = criarSala("Sala de Jantar");
+    Sala *hall = criarSala("Hall de Entrada", NULL);
+    Sala *biblioteca = criarSala("Biblioteca", "Página rasgada com anotações");
+    Sala *cozinha = criarSala("Cozinha", "Pegada molhada perto da pia");
+    Sala *sotao = criarSala("Sótão", NULL);
+    Sala *escritorio = criarSala("Escritório", "caneta com monograma antigo");
+    Sala *jardim = criarSala("Jardim", "fio de lã azul preso a um galho");
+    Sala *salaJantar = criarSala("Sala de Jantar", NULL);
 
     conectarSalas(hall, biblioteca, cozinha);
     conectarSalas(biblioteca, sotao, escritorio);
