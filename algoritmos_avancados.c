@@ -141,12 +141,85 @@ void liberarPistas(PistaNode *raiz) {
     free(raiz);
 }
 
+// --------------------
+// Tabela hash simples para mapear pista -> suspeito
+// --------------------
+typedef struct HashEntry {
+    char *chave;      // texto da pista
+    char *suspeito;   // nome do suspeito associado
+    struct HashEntry *prox;
+} HashEntry;
+
+#define HASH_SIZE 101
+
+// função de hash simples: soma de caracteres modulo tamanho
+static unsigned int hash_func(const char *s) {
+    unsigned int h = 0;
+    while (*s) h = h * 31 + (unsigned char)*s++;
+    return h % HASH_SIZE;
+}
+
+// inserirNaHash() – associa uma pista a um suspeito (substitui se já existir)
+void inserirNaHash(HashEntry **tabela, const char *pista, const char *suspeito) {
+    unsigned int h = hash_func(pista);
+    HashEntry *e = tabela[h];
+    while (e) {
+        if (strcmp(e->chave, pista) == 0) {
+            free(e->suspeito);
+            e->suspeito = strdup_safe(suspeito);
+            return;
+        }
+        e = e->prox;
+    }
+    HashEntry *novo = (HashEntry *)malloc(sizeof(HashEntry));
+    novo->chave = strdup_safe(pista);
+    novo->suspeito = strdup_safe(suspeito);
+    novo->prox = tabela[h];
+    tabela[h] = novo;
+}
+
+// encontrarSuspeito() – retorna o nome do suspeito associado a uma pista (ou NULL)
+const char *encontrarSuspeito(HashEntry **tabela, const char *pista) {
+    unsigned int h = hash_func(pista);
+    HashEntry *e = tabela[h];
+    while (e) {
+        if (strcmp(e->chave, pista) == 0) return e->suspeito;
+        e = e->prox;
+    }
+    return NULL;
+}
+
+// liberarHash() – libera toda a tabela hash
+void liberarHash(HashEntry **tabela) {
+    for (int i = 0; i < HASH_SIZE; ++i) {
+        HashEntry *e = tabela[i];
+        while (e) {
+            HashEntry *next = e->prox;
+            free(e->chave);
+            free(e->suspeito);
+            free(e);
+            e = next;
+        }
+        tabela[i] = NULL;
+    }
+}
+
+// contarOcorrenciasSuspeito() – conta quantas das pistas na BST apontam para o suspeito dado
+int contarOcorrenciasSuspeito(PistaNode *raiz, HashEntry **tabela, const char *suspeito) {
+    if (!raiz) return 0;
+    int count = 0;
+    const char *s = encontrarSuspeito(tabela, raiz->texto);
+    if (s && strcmp(s, suspeito) == 0) count = 1;
+    return count + contarOcorrenciasSuspeito(raiz->esq, tabela, suspeito) + contarOcorrenciasSuspeito(raiz->dir, tabela, suspeito);
+}
+
 // explorarSalasComPistas() – permite a navegação do jogador pela árvore e coleta pistas.
 // Ao visitar uma sala com pista, insere a pista na BST (apenas uma vez).
-void explorarSalas(Sala *raiz) {
+// Retorno: ponteiro para a raiz da BST de pistas coletadas (deve ser liberada pelo chamador)
+PistaNode *explorarSalas(Sala *raiz) {
     if (!raiz) {
         printf("Mapa vazio. Nada para explorar.\n");
-        return;
+        return NULL;
     }
     // Para esta versão, vamos coletar pistas em uma BST enquanto navegamos.
     PistaNode *arvorePistas = NULL;
@@ -243,8 +316,8 @@ void explorarSalas(Sala *raiz) {
     } else {
         exibirPistas(arvorePistas);
     }
-
-    liberarPistas(arvorePistas);
+    // Retorna a árvore de pistas para o chamador analisar (ex: julgamento)
+    return arvorePistas;
 }
 
 int main() {
@@ -273,9 +346,46 @@ int main() {
     printf("Bem-vindo(a) ao Detective Quest - Exploração da Mansão\n");
     printf("Começando no Hall de Entrada. Navegue com 'e' (esquerda), 'd' (direita) ou 's' (sair).\n");
 
-    explorarSalas(hall);
+    // Inicializa tabela hash e preenche associações pista -> suspeito
+    HashEntry *tabela[HASH_SIZE];
+    for (int i = 0; i < HASH_SIZE; ++i) tabela[i] = NULL;
 
-    // libera memória
+    // Associações definidas manualmente (exemplo)
+    inserirNaHash(tabela, "Página rasgada com anotações", "Sr. Black");
+    inserirNaHash(tabela, "Pegada molhada perto da pia", "Sra. White");
+    inserirNaHash(tabela, "caneta com monograma antigo", "Sr. Black");
+    inserirNaHash(tabela, "fio de lã azul preso a um galho", "Sr. Green");
+
+    // Exploração: retorna árvore de pistas coletadas
+    PistaNode *pistasColetadas = explorarSalas(hall);
+
+    // fase de acusação
+    if (pistasColetadas) {
+        char acusado[128];
+        printf("\nQuem você acusa? Digite o nome do suspeito: ");
+        if (fgets(acusado, sizeof(acusado), stdin)) {
+            // remover newline
+            acusado[strcspn(acusado, "\n")] = '\0';
+            if (strlen(acusado) == 0) {
+                printf("Nenhum suspeito informado. Encerrando.\n");
+            } else {
+                int ocorrencias = contarOcorrenciasSuspeito(pistasColetadas, tabela, acusado);
+                if (ocorrencias >= 2) {
+                    printf("Acusação aceita: %s. Foram encontradas %d pista(s) que o ligam ao crime.\n", acusado, ocorrencias);
+                } else {
+                    printf("Acusação rejeitada: %s. Apenas %d pista(s) ligam esse suspeito ao crime (são necessárias pelo menos 2).\n", acusado, ocorrencias);
+                }
+            }
+        } else {
+            printf("Entrada encerrada antes da acusação.\n");
+        }
+    } else {
+        printf("Nenhuma pista coletada. Não há base para uma acusação.\n");
+    }
+
+    // liberar recursos
+    liberarPistas(pistasColetadas);
+    liberarHash(tabela);
     liberarArvore(hall);
 
     return 0;
